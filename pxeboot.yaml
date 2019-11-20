@@ -1,0 +1,140 @@
+---
+- name: Creating PXEboot Server with Kickstart
+  hosts: annie
+  vars:
+    h: httpd
+    d: dhcp
+    dd: dhcpd
+    t: tftp-server
+    x: xinetd
+    s: syslinux
+    i: iptables
+  tasks:
+  - name: install packages
+    yum:
+      name:
+        - "{{ h }}"
+        - "{{ d }}"
+        - "{{ t }}"
+        - "{{ s }}"
+      state: latest
+  - name: enabling tftp
+    replace:
+      path: /etc/xinetd.d/tftp
+      regexp: "disabled                 = yes"
+      replace: "disabled                 = no"
+  - name: creating directory
+    file:
+      path: /var/lib/tftpboot/pxelinux.cfg
+      state: directory
+  - name: copying CD into html directory
+    copy:
+      src: /media/CentOS_6.10_Final/
+      remote_src: no
+      mode: preserve
+      dest: /var/www/html/
+  - name: copying isolinux
+    copy:
+      src: /media/CentOS_6.10_Final/isolinux/
+      remote_src: no
+      mode: preserve
+      dest: /var/lib/tftpboot/
+  - name: copying pxelinux.0
+    copy:
+      src: /usr/share/syslinux/pxelinux.0
+      remote_src: yes
+      dest: /var/lib/tftpboot/
+  - name: default file into pxelinux.cfg
+    copy:
+      src: /media/CentOS_6.10_Final/isolinux/isolinux.cfg
+      remote_src: no
+      mode: preserve
+      dest: /var/lib/tftpboot/pxelinux.cfg/default
+  - name: configuring dhcp
+    blockinfile:
+      path: /etc/dhcp/dhcpd.conf
+      block: |
+            default-lease-time 600;
+            max-lease-time 7200;
+            authoritative;
+            allow booting;
+            allow bootp;
+
+            subnet {{ ansible_facts.eth0.ipv4.network }} netmask {{ ansible_facts.eth0.ipv4.netmask }} {
+                  range {{ ansible_facts.eth0.ipv4.network }}.2 {{ ansible_facts.eth0.ipv4.network }}.254 ;
+                  next-server {{ ansible_facts.eth0.ipv4.address }};
+                  filename "pxelinux.0";
+            }
+  - name: fixing dhcp first range
+    replace:
+      path: /etc/dhcp/dhcpd.conf
+      regexp: ".0.2"
+      replace: ".2"
+  - name: fixing dhcp end range
+    replace:
+      path: /etc/dhcp/dhcpd.conf
+      regexp: ".0.254"
+      replace: ".254"
+  - name: copying kickstart file
+    copy:
+      src: /root/anaconda-ks.cfg
+      remote_src: yes
+      dest: /var/www/html/ks.cfg
+  - name: install url
+    lineinfile:
+      path: /var/www/html/ks.cfg
+      regexp: "url --url"
+      line: "url --url=http://{{ ansible_facts.eth0.ipv4.address }}/"
+  - name: baseurl
+    lineinfile:
+      path: /var/www/html/ks.cfg
+      regexp: "--baseurl="
+      line: "repo --name=\"CentOS\"  --baseurl=http://{{ ansible_facts.eth0.ipv4.address }}/ --cost=100"
+  - name: partitions
+    replace:
+      path: /var/www/html/ks.cfg
+      regexp: "#part"
+      replace: "part"
+  - name: volgroup
+    replace:
+      path: /var/www/html/ks.cfg
+      regexp: "#volgroup"
+      replace: "volgroup"
+  - name: logvol
+    replace:
+      path: /var/www/html/ks.cfg
+      regexp: "#logvol"
+      replace: "logvol"
+  - name: kickstart execution permission
+    file:
+      path: /var/www/html/ks.cfg
+      mode: 0755
+  - name: permissive selinux
+    selinux:
+      policy: targeted
+      state: permissive
+  - name: stop iptables
+    service:
+      name: "{{ i }}"
+      state: stopped
+      enabled: yes
+  - name: starting xinetd
+    service:
+      name: "{{ x }}"
+      state: started
+      enabled: no
+  - name: starting httpd
+    service:
+      name: "{{ h }}"
+      state: started
+      enabled: no
+  - name: starting dhcpd
+    service:
+      name: "{{ dd }}"
+      state: started
+      enabled: no 
+  - name: adding kickstart to default
+    replace:
+      path: /var/lib/tftpboot/pxelinux.cfg/default
+      regexp: "append initrd=initrd.img"
+      replace: "append initrd=initrd.img ks=http://{{ ansible_facts.eth0.ipv4.address }}/ks.cfg ksdevice=eth0"
