@@ -21,8 +21,9 @@
   - name: enabling tftp
     replace:
       path: /etc/xinetd.d/tftp
-      regexp: "disabled                 = yes"
-      replace: "disabled                 = no"
+      after: disable
+      regexp: "yes"
+      replace: "no"
   - name: creating directory
     file:
       path: /var/lib/tftpboot/pxelinux.cfg
